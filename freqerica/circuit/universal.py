@@ -1,5 +1,5 @@
 import numpy as np
-from global_qulacs import rotation_factor
+from freqerica.context import rotation_factor
 
 def decomp_unitary(umat):
     N = umat.shape[0]
