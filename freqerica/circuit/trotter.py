@@ -1,9 +1,10 @@
 import qulacs
 from qulacs.gate import to_matrix_gate, RZ
-from freqerica.operator.util import break_operators_into_subsets_dummy
 from math import pi
-from freqerica.context import rotation_factor
 import numpy as np
+
+from ..operator.util import break_operators_into_subsets_dummy
+from ..context import rotation_factor
 
 from time import time
 class ElpTime:
@@ -92,7 +93,7 @@ def trotter_step_2nd_order(circuit, qubit_operator, control_bit=None, function_b
             pauli_product_exponentiate_circuit(circuit, .5*term, control_bit)
 
 
-from freqerica.operator.symbol import WrappedExpr
+from ..operator.symbol import WrappedExpr
 class TrotterStep:
     """TrotterStepは、qubit operatorの指数関数をTrotter展開によりシミュレートする量子回路を扱うクラスです。
     qubit operatorの係数にはWrappedExprクラスのインスタンスである数式を含むことができます。

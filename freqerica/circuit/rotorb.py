@@ -1,6 +1,6 @@
 import qulacs
 import numpy as np
-from freqerica.context import rotation_factor
+from ..context import rotation_factor
 
 def decomp_unitary(umat):
     """ decompose unitary matrix U to 2x2 rotation matrices {R_k} """

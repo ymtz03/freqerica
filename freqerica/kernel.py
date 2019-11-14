@@ -6,10 +6,10 @@ from collections import namedtuple
 import qulacs
 import openfermion
 
-import freqerica.circuit.trotter
-from freqerica.util.qulacsnize import convert_state_vector
-from freqerica.circuit.universal import prepare_civec_circuit
-import freqerica.operator.ham
+from .circuit import trotter
+from .util.qulacsnize import convert_state_vector
+from .circuit.universal import prepare_civec_circuit
+from .operator import ham
 
 
 EstimateCorrelationResult = namedtuple('EstimateCorrelationResult', ['corr_exact', 'corr_trotter',
