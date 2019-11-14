@@ -214,6 +214,8 @@ def main(moleInput, dt, max_trotter_step, savefilename=None, civec=None, jobname
     #-> plt.savefig(jobname+'_figure_corr.png')
     #-> plt.show()
     
+def kernel(*args, **kwargs):
+    print('kernel invoked : args = {} : kwargs = {}'.format(args, kwargs))
     
 if __name__=='__main__':
     moleInput = ham.moleInput_example['LiH']
