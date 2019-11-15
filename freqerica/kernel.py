@@ -16,46 +16,12 @@ EstimateCorrelationResult = namedtuple('EstimateCorrelationResult', ['corr_exact
                                                                      'statevec_exact', 'statevec_trotter',
                                                                      'time_energy_fidelity'])
 
-def simulate_sampling(corr, k_list, beta_list, n_sample):
-    K = sum(k_list)
-    corr_extend = prony_like.calc_g_list(corr)
-    samples = np.empty((n_sample, len(k_list)), int)
-
-    for n in range(n_sample):
-        wf = np.zeros(2*K+1, complex) # wf[k] := coeff of |\Psi(k-K)>
-        wf[K] = 1.
-        prob_joint_prev = 1.
-        
-        for r, (k,b) in enumerate(zip(k_list, beta_list)):
-            wf_new = wf*0.5
-            wf_new[k: ] += wf[:-k]*np.exp(+1j*b)*0.25
-            wf_new[:-k] += wf[k: ]*np.exp(-1j*b)*0.25
-            prob_joint = np.dot(corr_extend, wf_new)  # Pr(mr==+1, mr-1 ... m2, m1)
-            print(prob_joint)
-            prob_joint = prob_joint.real
-            prob_conditional = prob_joint/prob_joint_prev # Pr(mr==+1 | mr-1 ... m2, m1) = Pr(mr==+1, mr-1 ... m2, m1)/Pr(mr-1 ... m2, m1)
-            m = +1 if np.random.rand() < prob_conditional else -1
-            samples[n,r] = m
-
-            if m == +1:
-                prob_joint_prev = prob_joint
-            else:
-                prob_joint_prev *= 1-prob_conditional
-                wf_new = wf*0.5
-                wf_new[k: ] -= wf[:-k]*np.exp(+1j*b)*0.25
-                wf_new[:-k] -= wf[k: ]*np.exp(-1j*b)*0.25
-            
-            wf = wf_new
-
-    return samples
-    
-
 def estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None):
     const_term = ham_qop.terms[()]
     n_site = openfermion.count_qubits(ham_qop)
 
     circuit_time_evo = qulacs.QuantumCircuit(n_site)
-    trotter_qulacs.trotter_step_2nd_order(circuit_time_evo, -1j * dt * ham_qop)
+    trotter.trotter_step_2nd_order(circuit_time_evo, -1j * dt * ham_qop)
 
     ham_tensor = openfermion.get_sparse_operator(ham_qop)
     
@@ -101,14 +67,20 @@ def estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None
     return EstimateCorrelationResult(corr_exact, corr_trotter, save_state_vec_exact, save_state_vec_trotter,
                                      save_time_energy_fidelity)
 
+def kernel(mol, norb=None, nelec=None,
+           dt=1.0, max_trotter_step=200,
+           jobname='noname',
+           civec=None # dict or 'HF', 'S', 'SD', 'SDT'
+):
+    print('kernel invoked')
+    print(mol.atom)
 
-def main(moleInput, dt, max_trotter_step, savefilename=None, civec=None, jobname=None):
-    print(moleInput.mol.atom)
-    ham_fop = ham.construct_exact_ham(moleInput)
-    n_site = openfermion.count_qubits(ham_fop)
-    
+    ### 1 : Construct Hamiltonian Operator
+    ham_fop = ham.construct_exact_ham(ham.MoleInput(mol, norb, nelec))
     ham_qop = openfermion.jordan_wigner(ham_fop)
-    
+    n_site  = openfermion.count_qubits(ham_qop)
+
+    ### 2 : Prepare Prepare-CIVec-Circuit
     circuit_state_prep = qulacs.QuantumCircuit(n_site)
     if civec==None:
         civec={}
@@ -125,9 +97,10 @@ def main(moleInput, dt, max_trotter_step, savefilename=None, civec=None, jobname
                 else:
                     civec[1<<(e1*2) | 2<<(e2*2)] = +coeff*(0.5**0.5)
                     civec[1<<(e2*2) | 2<<(e1*2)] = -coeff*(0.5**0.5)
-        
+    
     prepare_civec_circuit(circuit_state_prep, n_site, civec)
 
+    ### 3 : Initialize Quantum State
     state = qulacs.QuantumState(n_site)
     circuit_state_prep.update_quantum_state(state)
 
@@ -141,7 +114,7 @@ def main(moleInput, dt, max_trotter_step, savefilename=None, civec=None, jobname
     import matplotlib.pyplot as plt
     plt.figure(figsize=(15,6))
     
-    from diagonalize import exact_diagonalize
+    from .analysis.diagonalize import exact_diagonalize
     list_ene, list_num, list_2S, eigvec = exact_diagonalize(ham_qop, n_site, jobname)
     energy_4elec_1let = list_ene[(list_num==2)*(list_2S==0)]
     #energy_4elec_3let = list_ene[(list_num==2)*(list_2S==2)]
@@ -152,7 +125,7 @@ def main(moleInput, dt, max_trotter_step, savefilename=None, civec=None, jobname
     #-> plt.plot(energy_4elec_1let, weight_4elec_1let, 'rx', label='exact')
     #-> np.save(jobname + '_energy_4elec_1let.npy', energy_4elec_1let)
 
-    import prony_like
+    from .analysis import prony_like
     corr_exact_extend = prony_like.calc_g_list(result_corr.corr_exact)
     #phase, Avec = prony_like.main(corr_exact_extend, l=32)
     phase, Avec = prony_like.main(corr_exact_extend)
@@ -180,7 +153,7 @@ def main(moleInput, dt, max_trotter_step, savefilename=None, civec=None, jobname
     np.save(jobname + '_prony_save_trotter.npy', prony_save)
 
     
-    from ft import ft
+    from .analysis.ft import ft
     energy_range = np.arange(-8.1, -6.7, 0.0001)
     spectrum = ft(dt*np.arange(-max_trotter_step, max_trotter_step+1), corr_trotter_extend, energy_range)
     plt.plot(energy_range, spectrum.real/max(spectrum.real)/2, label='FT')
@@ -214,8 +187,6 @@ def main(moleInput, dt, max_trotter_step, savefilename=None, civec=None, jobname
     #-> plt.savefig(jobname+'_figure_corr.png')
     #-> plt.show()
     
-def kernel(*args, **kwargs):
-    print('kernel invoked : args = {} : kwargs = {}'.format(args, kwargs))
     
 if __name__=='__main__':
     moleInput = ham.moleInput_example['LiH']
