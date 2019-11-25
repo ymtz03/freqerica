@@ -19,6 +19,7 @@ setup(
     url='https://github.com/ymtz03/freqerica',
     license=license,
     packages=find_packages(exclude=('tests', 'docs')),
+    package_data={'freqerica':['output/template/*']},
     install_requires=['numpy','scipy','sympy','openfermion','qulacs'],
     test_suite='tests',
 )

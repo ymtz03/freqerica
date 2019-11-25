@@ -1,0 +1,12 @@
+body {margin:0; background-color:rgb(255, 255, 255); }
+
+h1 {padding-left:4;}
+h2 {}
+
+div {padding-left:4;}
+
+a {padding-left:4;}
+
+#molecularorbital, #simulation, #spectrum,#hamiltonian, #correlationfunction {
+    background-color:rgb(240, 255, 255);
+}

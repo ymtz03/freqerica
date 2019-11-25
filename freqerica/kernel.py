@@ -68,7 +68,7 @@ def estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None
                                      save_time_energy_fidelity)
 
 def kernel(mol, norb=None, nelec=None,
-           dt=1.0, max_trotter_step=200,
+           dt=1.0, max_trotter_step=50,
            jobname='noname',
            civec=None # dict or 'HF', 'S', 'SD', 'SDT'
 ):
@@ -110,6 +110,39 @@ def kernel(mol, norb=None, nelec=None,
     state = qulacs.QuantumState(n_site)
     circuit_state_prep.update_quantum_state(state)
     state_vec_exact = convert_state_vector(n_site, state.get_vector())
+
+    from .analysis.diagonalize import exact_diagonalize
+    list_ene, list_num, list_2S, eigvec = exact_diagonalize(ham_qop, n_site, jobname)
+    energy_4elec_1let = list_ene[(list_num==2)*(list_2S==0)]
+
+    from .analysis import prony_like
+    corr_exact_extend   = prony_like.calc_g_list(result_corr.corr_exact)
+    corr_trotter_extend = prony_like.calc_g_list(result_corr.corr_trotter)
+    phase_exact  , Avec_exact   = prony_like.main(corr_exact_extend)
+    phase_trotter, Avec_trotter = prony_like.main(corr_trotter_extend)
+
+    from .analysis.ft import ft
+    energy_range = np.arange(-8.1, -6.7, 0.0001)
+    spectrum = ft(dt*np.arange(-max_trotter_step, max_trotter_step+1), corr_trotter_extend, energy_range)
+
+    from .output import freqgraph
+    #freqgraph.draw(energy_4elec_1let, phase_exact, Avec_exact, phase_trotter, Avec_trotter, dt, energy_range, spectrum)
+    out = freqgraph.Outputter()
+    out.energy        = energy_4elec_1let
+    out.phase_exact   = phase_exact
+    out.Avec_exact    = Avec_exact
+    out.phase_trotter = phase_trotter
+    out.Avec_trotter  = Avec_trotter
+    out.dt            = dt
+    out.energy_range  = energy_range
+    out.spectrum      = spectrum
+    out.corr_exact    = result_corr.corr_exact
+    out.corr_trotter  = result_corr.corr_trotter
+    out.save()
+    
+    assert False
+
+    ###################################################
     
     import matplotlib.pyplot as plt
     plt.figure(figsize=(15,6))
