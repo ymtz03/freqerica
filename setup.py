@@ -20,6 +20,6 @@ setup(
     license=license,
     packages=find_packages(exclude=('tests', 'docs')),
     package_data={'freqerica':['output/template/*']},
-    install_requires=['numpy','scipy','sympy','openfermion','qulacs'],
+    install_requires=['numpy','scipy','sympy','openfermion','qulacs','pyscf'],
     test_suite='tests',
 )
