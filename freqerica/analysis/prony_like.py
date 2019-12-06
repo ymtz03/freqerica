@@ -51,11 +51,32 @@ def main(g_list, l=None, verbose=True, complexcoeff=False):
         result = lsq_linear(Bmat_extend[:,:-1]-Bmat_extend[:,-1:], g_list_extend - Bmat_extend[:,-1], bounds=(0,1))
         Avec = np.concatenate((result.x, np.array([1-np.sum(result.x)])))
 
-
-    print('K : {:4d}'.format(K))
-    print('l : {:4d}'.format(l))
+    #print('K : {:4d}'.format(K))
+    #print('l : {:4d}'.format(l))
     
     return phase, Avec
+
+def estimate(corr, dt, hint_energy, l=None, verbose=True, complexcoeff=False):
+    phase, Avec = main(corr, l=l, verbose=verbose, complexcoeff=complexcoeff)
+
+    # e^{-iEt} = e^{i(phase + 2pi*k)} (0<= phase <2pi, k is integer)
+    # phase + 2pi*k = -Et
+    # E = -(phase + 2pi*k)/t
+
+    #        k=k0+1      k=k0        k=k0-1      k=k0-2
+    # ---|-----------|-----------|-----------|-----------|---> E
+    #     2pi<------0 2pi<------0 2pi<------0 2pi<------0      phase
+
+    k0 = int(round(-hint_energy*dt/2/np.pi))
+    k_range = range(k0-2, k0+2)
+    l = len(phase)
+    energy_and_amp = np.zeros((2, l*len(k_range)), float)
+    for i,k in enumerate(range(k0-2, k0+2)):
+        energy_and_amp[0, i*l:(i+1)*l] = -(phase + 2*np.pi*k)/dt
+        energy_and_amp[1, i*l:(i+1)*l] = Avec
+
+    return energy_and_amp
+    
 
 if __name__=='__main__':
     A = np.array([0.1, 0.2, 0.3, 0.4])
