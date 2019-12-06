@@ -1,3 +1,65 @@
+// Molecular Orbital
+( function() {
+
+  var width = 150, height = 400;
+  var svg = d3.select("#molecularorbital")
+              .append("svg").attr("width",(width/800)*100+"%").attr("viewBox", [0,0, width, height]);
+  var margin = {top: 20, right:40, bottom:30, left:40};
+
+  //svg.style("background-color","pink");
+  //svg.append("rect").attr("x", margin.right).attr("y", margin.top)
+  //   .attr("width", width-(margin.left+margin.right))
+  //   .attr("height", height-(margin.top+margin.bottom));
+
+  var time = data.corr_re_exact.map((d,i)=>i*data.dt);
+  console.log(time);
+
+  var x = d3.scaleLinear()
+            .domain([0, 1])
+            .range([margin.left, width-margin.right])
+            .nice();
+
+  var y = d3.scaleLinear()
+            .domain(d3.extent(data.mo_energy))
+            .range([height-margin.bottom, margin.top])
+            .nice();
+
+  var vgrid = svg.append("g")
+                 .selectAll("path")
+                 .data(y.ticks())
+                 .enter()
+                 .append("line")
+                 .attr("stroke-width", 1)
+                 .attr("stroke-dasharray", "4")
+                 .attr("stroke", "lightgray")
+                 .attr("y1", d=>y(d))
+                 .attr("y2", d=>y(d))
+                 .attr("x1", margin.left)
+                 .attr("x2", width-margin.right);
+
+  irrepcolormap = {"A1":"red"};
+  
+  var mo = svg.append("g")
+              .selectAll("path")
+              .data(data.mo_energy)
+              .enter().append("g").attr("class", "mo");
+  mo.append("line")
+    .attr("stroke-width", 1)
+  //                 .attr("stroke-dasharray", "4")
+    .attr("stroke", (d,i)=>(irrepcolormap[data.mo_irrep[i]] || "steelblue"))
+    .attr("y1", d=>y(d))
+    .attr("y2", d=>y(d))
+    .attr("x1", margin.left)
+    .attr("x2", width-margin.right);
+  mo.append("text").attr("x", width-margin.right).attr("y", d=>y(d)).text((d,i)=>i);
+  
+
+  var yaxis = svg.append("g")
+                 .call(d3.axisLeft(y))
+                 .attr("transform", "translate(" + (margin.left) + ",0)" );
+
+})();
+
 // Correlation Function
 ( function() {
 
@@ -125,9 +187,9 @@
             .nice();
 
   var y = d3.scaleLinear()
-            .domain(d3.extent(data.spectrum))
-            .range([height-margin.bottom, margin.top])
-            .nice();
+            .domain([0, d3.max(data.spectrum)*1.02])
+            .range([height-margin.bottom, margin.top]);
+            //.nice();
 
   var y_prony = d3.scaleLinear()
                   .domain([0,1])
@@ -159,6 +221,7 @@
                    .attr("y1", height-margin.bottom)
                    .attr("y2", margin.top);
 
+  /*
   var prony_exact = svg.append("g").selectAll("xxx").data(data.prony_p_exact).enter().append("circle")
                        .attr("cx", d=>x((-d-2*Math.PI)/data.dt) )
                        .attr("cy", (d,i)=>y_prony(data.prony_A_exact[i]))
@@ -174,6 +237,24 @@
                        .attr("stroke","green")
                        .attr("stroke-width",1)
                        .attr("fill","none");
+  */
+
+  var prony_exact = svg.append("g").selectAll("xxx").data(data.prony_e_exact).enter().append("circle")
+                       .attr("cx", d=>x(d))
+                       .attr("cy", (d,i)=>y_prony(data.prony_a_exact[i]))
+                       .attr("r", 3)
+                       .attr("stroke","red")
+                       .attr("stroke-width",1)
+                       .attr("fill", "none");
+
+  var prony_trott = svg.append("g").selectAll("xxx").data(data.prony_e_trott).enter().append("circle")
+                       .attr("cx", d=>x(d))
+                       .attr("cy", (d,i)=>y_prony(data.prony_a_trott[i]))
+                       .attr("r", 3)
+                       .attr("stroke","green")
+                       .attr("stroke-width",1)
+                       .attr("fill", "none");
+
 
   var freq_vs_amp = [];
   for(var i=0; i<data.energy_range.length; ++i) {

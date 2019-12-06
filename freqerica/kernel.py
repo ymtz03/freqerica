@@ -8,9 +8,9 @@ import openfermion
 
 from .circuit import trotter
 from .util.qulacsnize import convert_state_vector
-from .circuit.universal import prepare_civec_circuit
-from .operator import ham
-
+from .circuit.universal import prepare_civec_circuit, prepstate
+from .operator import ham, util
+from .output import freqgraph
 
 EstimateCorrelationResult = namedtuple('EstimateCorrelationResult', ['corr_exact', 'corr_trotter',
                                                                      'statevec_exact', 'statevec_trotter',
@@ -19,6 +19,7 @@ EstimateCorrelationResult = namedtuple('EstimateCorrelationResult', ['corr_exact
 def estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None):
     const_term = ham_qop.terms[()]
     n_site = openfermion.count_qubits(ham_qop)
+    print('n_site : ', n_site)
 
     circuit_time_evo = qulacs.QuantumCircuit(n_site)
     trotter.trotter_step_2nd_order(circuit_time_evo, -1j * dt * ham_qop)
@@ -68,158 +69,185 @@ def estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None
                                      save_time_energy_fidelity)
 
 def kernel(mol, norb=None, nelec=None,
-           dt=1.0, max_trotter_step=50,
+           dt=1.0, max_trotter_step=100,
            jobname='noname',
-           civec=None # dict or 'HF', 'S', 'SD', 'SDT'
+           civec=None, # dict or 'HF', 'S', 'SD', 'SDT'
+           mult=None,
+           max_excitation=None,
+           symm_eigval_map={},
+           use_symm_remover=False,
+           ft_energy_range=np.arange(-.5, 2.5, 0.002),
 ):
+
+    out = freqgraph.Outputter()
+
     print('kernel invoked')
-    print(mol.atom)
+    print('mol.atom :', mol.atom)
+    print('mol.symmetry :', mol.symmetry)
+    print('mol.topgroup :', mol.topgroup)
+    print('mol.groupname :', mol.groupname)
 
     ### 1 : Construct Hamiltonian Operator
-    ham_fop = ham.construct_exact_ham(ham.MoleInput(mol, norb, nelec))
+    orbprop, energy_casci = ham.calculate_moint_and_energy(ham.MoleInput(mol, norb, nelec))
+    ham_fop = ham.construct_exact_ham(orbprop)
     ham_qop = openfermion.jordan_wigner(ham_fop)
     n_site  = openfermion.count_qubits(ham_qop)
 
-    ### 2 : Prepare Prepare-CIVec-Circuit
-    circuit_state_prep = qulacs.QuantumCircuit(n_site)
-    if civec==None:
-        civec={}
-        #-> coeff = (2/(n_site*(n_site-1)))**0.5
-        #-> for e1 in range(n_site):
-        #->     for e2 in range(e1):
-        #->         civec[1<<e1 | 1<<e2] = coeff
-        n_orb = n_site//2
-        coeff = ((n_orb)*(n_orb-1)//2 + n_orb)**(-.5) # Comb(norb, 2)**(-1/2)
-        for e1 in range(n_site//2):
-            for e2 in range(e1, n_site//2):
-                if e1==e2:
-                    civec[1<<(e1*2) | 2<<(e2*2)] = +coeff                    
-                else:
-                    civec[1<<(e1*2) | 2<<(e2*2)] = +coeff*(0.5**0.5)
-                    civec[1<<(e2*2) | 2<<(e1*2)] = -coeff*(0.5**0.5)
+    for iorb in range(len(orbprop.irreps)):
+        orbtype = 'core' if iorb < orbprop.ncore else 'active' if iorb < orbprop.ncore+orbprop.ncas else 'virtual'
+        print('{:03d}  {:4s}  {:7s}  {:+.6e}'.format(iorb, orbprop.irreps[iorb], orbtype, orbprop.mo_energy[iorb]))
+
+    ### 2 : Tapering of qubits using Molecular Symmetry
+    from .operator import symm
+    #symm_paulistr = symm.symmetry_pauli_string(orbprop, operation_list=['Rz2', 'sxz', 'syz'])
+    symm_paulistr = symm.symmetry_pauli_string(orbprop, operation_list=list(symm_eigval_map))
+    for symmop, qop in symm_paulistr.items():
+        print('[ham_qop, {:5s}] = [ham_qop, {}] = {}'.format(symmop, str(qop), openfermion.commutator(ham_qop, qop)))
+
+    remover = symm.SymmRemover(n_site, list(symm_paulistr.values()) )
+    remover.set_eigvals([symm_eigval_map[symm] for symm in symm_paulistr])
+    ham_qop_tapered = remover.remove_symm_qubits(ham_qop)
+    print(remover)
+    print('len(ham         ) = ', len(ham_qop.terms))
+    print('len(ham[tapered]) = ', len(ham_qop_tapered.terms))
+
+    nterm         = [0]*(norb*2+1)
+    nterm_tapered = [0]*(norb*2+1)
+    for k in ham_qop.terms        : nterm        [len(k)] += 1
+    for k in ham_qop_tapered.terms: nterm_tapered[len(k)] += 1
+    out.nterm         = nterm
+    out.nterm_tapered = nterm_tapered
     
-    prepare_civec_circuit(circuit_state_prep, n_site, civec)
+    # ### 2 : Prepare Prepare-CIVec-Circuit
+    # circuit_state_prep = qulacs.QuantumCircuit(n_site)
+    # if civec==None:
+    #     civec={}
+    #     #-> coeff = (2/(n_site*(n_site-1)))**0.5
+    #     #-> for e1 in range(n_site):
+    #     #->     for e2 in range(e1):
+    #     #->         civec[1<<e1 | 1<<e2] = coeff
+    #     n_orb = n_site//2
+    #     coeff = ((n_orb)*(n_orb-1)//2 + n_orb)**(-.5) # Comb(norb, 2)**(-1/2)
+    #     for e1 in range(n_site//2):
+    #         for e2 in range(e1, n_site//2):
+    #             if e1==e2:
+    #                 civec[1<<(e1*2) | 2<<(e2*2)] = +coeff                    
+    #             else:
+    #                 civec[1<<(e1*2) | 2<<(e2*2)] = +coeff*(0.5**0.5)
+    #                 civec[1<<(e2*2) | 2<<(e1*2)] = -coeff*(0.5**0.5)
+    # 
+    # det_hf = sum([1<<i for i in range(nelec)])
+    # civec = {det_hf:1.0}
+    # prepare_civec_circuit(circuit_state_prep, n_site, civec)
+    # 
+    # 
+    # ### 3 : Initialize Quantum State
+    # state = qulacs.QuantumState(n_site)
+    # circuit_state_prep.update_quantum_state(state)
 
     ### 3 : Initialize Quantum State
-    state = qulacs.QuantumState(n_site)
-    circuit_state_prep.update_quantum_state(state)
+    if mult is None: mult = 1 if nelec%2==0 else 2
+    na = (nelec+mult-1)//2
+    nb = nelec - na
+    wfs = util.listupCSFs(norb, mult, na, nb, remover, max_excitation=max_excitation)
+    print(wfs)
+    wf_initial = {}
+    coeff_csf = len(wfs)**(-0.5)
+    for csf in wfs:
+        for sd, coeff_sd in csf.items():
+            if sd not in wf_initial: wf_initial[sd]=0
+            wf_initial[sd] += coeff_sd*coeff_csf
 
-    result_corr = estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None)
+    wf_initial = util.mixCSFs(wfs)
+    print(wf_initial)
+    state = prepstate(norb*2, wf_initial)
+    print('Target Multiplicity : ', mult)
+    print('norm(state) : ', state.get_norm())
+        
 
-    ###################################################
-    state = qulacs.QuantumState(n_site)
-    circuit_state_prep.update_quantum_state(state)
-    state_vec_exact = convert_state_vector(n_site, state.get_vector())
+    ### 3' : Operate clifford operation
+    from .circuit.symm import SymmRemoveClifford
+    symm_remove_circuits = SymmRemoveClifford(norb*2, remover)
+    
+    from .operator.util import paulistr
+    state_symm_removed = state.copy()
+    for symm_remove_circuit in symm_remove_circuits.circuit_list:
+        symm_remove_circuit.update_quantum_state(state_symm_removed)
+    #for sd, coeff in enumerate(state_symm_removed.get_vector()):
+    #    if abs(coeff)<1e-10: continue
+    #    print('{:010b} : {:+.3e}'.format(sd, coeff))
 
+    statevec = state_symm_removed.get_vector().reshape([2]*(norb*2))    
+    n_qubit_tapered = norb*2
+    slices = [slice(None)]*(norb*2)
+    for qop_tgtpauli in remover.targetpauli_qop_list:
+        index_tgtpauli = paulistr(qop_tgtpauli)[0][0]
+        slices[-(index_tgtpauli+1)] = 0
+        n_qubit_tapered -= 1
+        
+    slices_debug = [slice(None)]*(norb*2)
+    for qop_tgtpauli in remover.targetpauli_qop_list:
+        index_tgtpauli = paulistr(qop_tgtpauli)[0][0]
+        slices_debug[-(index_tgtpauli+1)] = 1
+    print(slices)
+    #print(slices_debug)
+    #for sd, coeff in enumerate(statevec[slices].reshape(-1)):
+    #    if abs(coeff)<1e-10: continue
+    #    print('{:010b} : {:+.3e}'.format(sd, coeff))
+    
+    print(np.dot(statevec[slices].reshape(-1), statevec[slices_debug].reshape(-1)))
+    #print(statevec[slices]-statevec[slices_debug])
+    #assert np.max(abs(statevec[slices]-statevec[slices_debug])) < 1e-10
+
+    statevec_tapered = statevec[slices].reshape(-1)
+    statevec_tapered /= np.linalg.norm(statevec_tapered)
+    state_tapered = prepstate(n_qubit_tapered, statevec_tapered)
+
+    ### 4 : Estimate correlation function
+    if use_symm_remover:
+        result_corr = estimate_correlation(ham_qop_tapered, state_tapered, dt, max_trotter_step, savefilename=None)
+    else:
+        result_corr = estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None)
+
+
+    ### 5 : Calculate eigenenergies
     from .analysis.diagonalize import exact_diagonalize
     list_ene, list_num, list_2S, eigvec = exact_diagonalize(ham_qop, n_site, jobname)
-    energy_4elec_1let = list_ene[(list_num==2)*(list_2S==0)]
+    energy_1let = list_ene[(list_num==nelec)*(list_2S==0)]
 
     from .analysis import prony_like
-    corr_exact_extend   = prony_like.calc_g_list(result_corr.corr_exact)
-    corr_trotter_extend = prony_like.calc_g_list(result_corr.corr_trotter)
+    corr_exact_extend = prony_like.calc_g_list(result_corr.corr_exact)
+    corr_trott_extend = prony_like.calc_g_list(result_corr.corr_trotter)
     phase_exact  , Avec_exact   = prony_like.main(corr_exact_extend)
-    phase_trotter, Avec_trotter = prony_like.main(corr_trotter_extend)
+    phase_trotter, Avec_trotter = prony_like.main(corr_trott_extend)
+    energy_and_amp_exact = prony_like.estimate(corr_exact_extend, dt, hint_energy=energy_casci)
+    energy_and_amp_trott = prony_like.estimate(corr_trott_extend, dt, hint_energy=energy_casci)
 
     from .analysis.ft import ft
-    energy_range = np.arange(-8.1, -6.7, 0.0001)
-    spectrum = ft(dt*np.arange(-max_trotter_step, max_trotter_step+1), corr_trotter_extend, energy_range)
+    #energy_range = np.arange(-8.1, -6.7, 0.0001)
+    energy_range = energy_casci + ft_energy_range
+    #spectrum = ft(dt*np.arange(-max_trotter_step, max_trotter_step+1), corr_trott_extend, energy_range)
+    #spectrum = ft(dt*np.arange(-max_trotter_step, max_trotter_step+1), corr_trott_extend, energy_range, use_window=False)
+    spectrum = ft(dt*np.arange(-max_trotter_step, max_trotter_step+1), corr_exact_extend, energy_range)
 
-    from .output import freqgraph
     #freqgraph.draw(energy_4elec_1let, phase_exact, Avec_exact, phase_trotter, Avec_trotter, dt, energy_range, spectrum)
-    out = freqgraph.Outputter()
-    out.energy        = energy_4elec_1let
+    out.orbprop       = orbprop
+    out.energy        = energy_1let
     out.phase_exact   = phase_exact
     out.Avec_exact    = Avec_exact
     out.phase_trotter = phase_trotter
     out.Avec_trotter  = Avec_trotter
+    out.prony_exact   = energy_and_amp_exact
+    out.prony_trott   = energy_and_amp_trott
     out.dt            = dt
     out.energy_range  = energy_range
     out.spectrum      = spectrum
     out.corr_exact    = result_corr.corr_exact
     out.corr_trotter  = result_corr.corr_trotter
     out.save()
-    
-    assert False
 
-    ###################################################
-    
-    import matplotlib.pyplot as plt
-    plt.figure(figsize=(15,6))
-    
-    from .analysis.diagonalize import exact_diagonalize
-    list_ene, list_num, list_2S, eigvec = exact_diagonalize(ham_qop, n_site, jobname)
-    energy_4elec_1let = list_ene[(list_num==2)*(list_2S==0)]
-    #energy_4elec_3let = list_ene[(list_num==2)*(list_2S==2)]
-    plt.vlines(energy_4elec_1let, 0, .5, lw=1)
-    #plt.vlines(energy_4elec_3let, 0, 1, 'r', lw=1, label='3let')
-    weight_4elec_1let = np.abs(np.dot(state_vec_exact, eigvec[:, (list_num==2)*(list_2S==0)]))**2
-    print(np.sum(weight_4elec_1let))
-    #-> plt.plot(energy_4elec_1let, weight_4elec_1let, 'rx', label='exact')
-    #-> np.save(jobname + '_energy_4elec_1let.npy', energy_4elec_1let)
+    print("kernel finished")
 
-    from .analysis import prony_like
-    corr_exact_extend = prony_like.calc_g_list(result_corr.corr_exact)
-    #phase, Avec = prony_like.main(corr_exact_extend, l=32)
-    phase, Avec = prony_like.main(corr_exact_extend)
-    plt.plot(-(phase+2*np.pi)/dt, Avec, 'b+', ms=12)
-    plt.plot(-(phase+4*np.pi)/dt, Avec, 'b+', ms=12, label='prony (exact g(k))')
-    plt.plot(-(phase+6*np.pi)/dt, Avec, 'b+', ms=12)
-    l = len(phase)
-    m = 5
-    prony_save = np.empty((2,l*m), float)
-    for i in range(m):
-        prony_save[0, i*l:i*l+l] = -(phase+m*np.pi)/dt
-        prony_save[1, i*l:i*l+l] = Avec
-    np.save(jobname + '_prony_save_exact.npy', prony_save)
-    
-
-    corr_trotter_extend = prony_like.calc_g_list(result_corr.corr_trotter)
-    phase, Avec = prony_like.main(corr_trotter_extend)
-    plt.plot(-(phase+2*np.pi)/dt, Avec, 'g1', ms=12)
-    plt.plot(-(phase+4*np.pi)/dt, Avec, 'g1', ms=12, label='prony (trotter g(k))')
-    plt.plot(-(phase+6*np.pi)/dt, Avec, 'g1', ms=12)
-    prony_save = np.empty((2,l*m), float)
-    for i in range(m):
-        prony_save[0, i*l:i*l+l] = -(phase+m*np.pi)/dt
-        prony_save[1, i*l:i*l+l] = Avec
-    np.save(jobname + '_prony_save_trotter.npy', prony_save)
-
-    
-    from .analysis.ft import ft
-    energy_range = np.arange(-8.1, -6.7, 0.0001)
-    spectrum = ft(dt*np.arange(-max_trotter_step, max_trotter_step+1), corr_trotter_extend, energy_range)
-    plt.plot(energy_range, spectrum.real/max(spectrum.real)/2, label='FT')
-
-    plt.xlim(energy_range[0], energy_range[-1])
-    plt.ylim(-0.02, 0.52)
-    plt.xticks(energy_4elec_1let, rotation=70)
-    plt.yticks(np.arange(0, 0.55, 0.05))
-    plt.xlabel(r'$energy\ (a.u.)$')
-    plt.ylabel(r'$A_j$')
-    plt.legend()
-    plt.grid()
-    plt.tight_layout()
-    plt.savefig(jobname+'_figure_energy.png')
-    #plt.show()
-
-    #time_plot = np.arange(-max_trotter_step*dt, (max_trotter_step+1)*dt, dt)
-    #plt.plot(time_plot, corr_trotter_extend.real, 'r-' , label='trotter.real')
-    #plt.plot(time_plot, corr_trotter_extend.imag, 'r--', label='trotter.imag')
-    #plt.plot(time_plot, corr_exact_extend  .real, 'b-' , label='exact.real')
-    #plt.plot(time_plot, corr_exact_extend  .imag, 'b--', label='exact.imag')
-    #-> time_plot = np.arange(0, (max_trotter_step+1)*dt, dt)
-    #-> plt.plot(time_plot, result_corr.corr_trotter.real, 'r-' , lw=1, label='trotter.real')
-    #-> plt.plot(time_plot, result_corr.corr_trotter.imag, 'r--', lw=1, label='trotter.imag')
-    #-> plt.plot(time_plot, result_corr.corr_exact  .real, 'b-' , lw=1, label='exact.real')
-    #-> plt.plot(time_plot, result_corr.corr_exact  .imag, 'b--', lw=1, label='exact.imag')
-    #-> plt.xlabel('k')
-    #-> plt.ylabel('g(k)')
-    #-> plt.grid()
-    #-> plt.legend()
-    #-> plt.savefig(jobname+'_figure_corr.png')
-    #-> plt.show()
-    
     
 if __name__=='__main__':
     moleInput = ham.moleInput_example['LiH']

@@ -16,7 +16,7 @@ class BasicTestSuite(unittest.TestCase):
         import scipy
         import qulacs
 
-        n_orb = 4#2
+        n_orb = 2
 
         const = Symbol('const')
         T1 = [[None for _ in range(n_orb)] for _ in range(n_orb)]
