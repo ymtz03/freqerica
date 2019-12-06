@@ -218,3 +218,25 @@ def prepare_civec_circuit(circuit, n_qubits, civec, orb_qubit_map=None):
         all_components[k_parent] = max((c_parent**2 - c_child**2),0)**0.5
         
     #print(all_components)
+
+
+def prepstate(n_qubit, statevec):
+    dim = 2**n_qubit
+
+    if isinstance(statevec, dict):
+        sv = np.zeros((dim,), complex)
+        for k, v in statevec.items():
+            sv[k] = v
+        statevec =sv
+
+    matrix = np.zeros((dim, dim), complex)
+    matrix[:,0] = statevec
+    
+    from qulacs.gate import DenseMatrix
+    from qulacs import QuantumState
+    state = QuantumState(n_qubit)
+    state.set_zero_state()
+    gate = DenseMatrix(list(range(n_qubit)), matrix)
+    gate.update_quantum_state(state)
+
+    return state
