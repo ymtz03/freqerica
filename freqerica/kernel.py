@@ -6,7 +6,7 @@ from collections import namedtuple
 import qulacs
 import openfermion
 
-import hamiltonian.exact
+from .hamiltonian import exact
 from .circuit import trotter
 from .util.qulacsnize import convert_state_vector
 from .circuit.universal import prepare_civec_circuit, prepstate
@@ -81,6 +81,63 @@ def estimate_correlation(ham_qop, state, dt, max_trotter_step, outputter, savefi
     return EstimateCorrelationResult(corr_exact, corr_trotter, save_state_vec_exact, save_state_vec_trotter,
                                      save_time_energy_fidelity)
 
+def estimate_corr_new(ham, dt, max_trotter_step, outputter, savefilename=None):    
+    n_site = openfermion.count_qubits(ham.ham_qop)
+    state = ham.state
+    state_vec_exact = convert_state_vector(n_site, state.get_vector())
+
+    steps = np.arange(max_trotter_step+1)
+
+    save_state_vec_exact   = np.empty((len(steps), 2**n_site), np.complex128)
+    save_state_vec_trotter = np.empty((len(steps), 2**n_site), np.complex128)
+    save_time_energy_fidelity = np.empty((len(steps), 4), float)
+    save_time_energy_fidelity[:, 0] = steps * dt
+
+    time_sim = 0
+
+    ham.init_propagate(dt)
+    ham_tensor = openfermion.get_sparse_operator(ham.ham_qop)    
+    
+    for istep, n_trotter_step in enumerate(steps):
+        state_vec_trotter = convert_state_vector(n_site, state.get_vector())
+
+        # calculate energy and fidelity
+        energy_exact   = openfermion.expectation(ham_tensor, state_vec_exact)
+        energy_trotter = openfermion.expectation(ham_tensor, state_vec_trotter)
+        fidelity = np.abs(np.dot(np.conjugate(state_vec_exact), state_vec_trotter))**2
+
+        # save
+        save_state_vec_exact[istep]   = state_vec_exact
+        save_state_vec_trotter[istep] = state_vec_trotter
+        save_time_energy_fidelity[istep, 1] = energy_exact.real
+        save_time_energy_fidelity[istep, 2] = energy_trotter.real
+        save_time_energy_fidelity[istep, 3] = fidelity
+
+        # time propergation
+        time_bgn = time()
+        ham.propagate(state)
+        time_sim += time()-time_bgn
+        state_vec_exact = scipy.sparse.linalg.expm_multiply(-1j * dt * ham_tensor, state_vec_exact)
+
+    corr_exact   = np.dot(save_state_vec_exact[0]  , save_state_vec_exact.T)
+    corr_trotter = np.dot(save_state_vec_trotter[0], save_state_vec_trotter.T)
+
+    outputter.n_qubit = n_site
+    outputter.n_trott_step = max_trotter_step
+    outputter.ngate = ham.trotterstep.count_gates()
+    outputter.time_sim = time_sim
+    
+    if savefilename:
+        np.save(savefilename+'_ham_tensor', ham_tensor.todense())
+        np.save(savefilename+'_corr_exact.npy', corr_exact)
+        np.save(savefilename+'_corr_trotter.npy', corr_trotter)
+        np.save(savefilename+'_state_vec_exact.npy', save_state_vec_exact)
+        np.save(savefilename+'_state_vec_trotter.npy', save_state_vec_trotter)
+        np.save(savefilename+'_time_energy_fidelity.npy', save_time_energy_fidelity)
+
+    return EstimateCorrelationResult(corr_exact, corr_trotter, save_state_vec_exact, save_state_vec_trotter,
+                                     save_time_energy_fidelity)
+
 def kernel(mol, norb=None, nelec=None,
            dt=1.0, max_trotter_step=100,
            jobname='noname',
@@ -95,10 +152,6 @@ def kernel(mol, norb=None, nelec=None,
     out = freqgraph.Outputter()
 
     print('kernel invoked')
-    print('mol.atom :', mol.atom)
-    print('mol.symmetry :', mol.symmetry)
-    print('mol.topgroup :', mol.topgroup)
-    print('mol.groupname :', mol.groupname)
 
     ### 0 : Prepare molecular orbitals and integrals
     orbprop, energy_casci = orbital.calculate_moint_and_energy(orbital.MoleInput(mol, norb, nelec))
@@ -107,40 +160,21 @@ def kernel(mol, norb=None, nelec=None,
         print('{:03d}  {:4s}  {:7s}  {:+.6e}'.format(iorb, orbprop.irreps[iorb], orbtype, orbprop.mo_energy[iorb]))
     
     ### 1 : Construct Hamiltonian Operator
-    ham = hamiltonian.exact.ExactHam(orbprop)
+    ham = ham_exact = exact.ExactHam(orbprop)
+    if use_symm_remover:
+        ham = exact.ExactHam(orbprop, symm_eigval_map=symm_eigval_map)
     #TODO-> ham = hamiltonian.Rankone(orbprop)
     #TODO-> ham = hamiltonian.Jastrow(orbprop)
     
-    ham_qop = ham.ham_qop
-    n_site = ham.n_site
-
-    ### 2 : Tapering of qubits using Molecular Symmetry
-    from .op import symm
-    #symm_paulistr = symm.symmetry_pauli_string(orbprop, operation_list=['Rz2', 'sxz', 'syz'])
-    symm_paulistr = symm.symmetry_pauli_string(orbprop, operation_list=list(symm_eigval_map))
-    for symmop, qop in symm_paulistr.items():
-        print('[ham_qop, {:5s}] = [ham_qop, {}] = {}'.format(symmop, str(qop), openfermion.commutator(ham_qop, qop)))
-
-    remover = symm.SymmRemover(n_site, list(symm_paulistr.values()) )
-    remover.set_eigvals([symm_eigval_map[symm] for symm in symm_paulistr])
-    ham_qop_tapered = remover.remove_symm_qubits(ham_qop)
-    print(remover)
-    print('len(ham         ) = ', len(ham_qop.terms))
-    print('len(ham[tapered]) = ', len(ham_qop_tapered.terms))
-
-    nterm         = [0]*(norb*2+1)
-    nterm_tapered = [0]*(norb*2+1)
-    for k in ham_qop.terms        : nterm        [len(k)] += 1
-    for k in ham_qop_tapered.terms: nterm_tapered[len(k)] += 1
-    out.nterm         = nterm
-    out.nterm_tapered = nterm_tapered
+    out.nterm         = ham_exact.nterm
+    out.nterm_tapered = ham.nterm
     
     ### 3 : Initialize Quantum State
     if mult is None: mult = 1 if nelec%2==0 else 2
     na = (nelec+mult-1)//2
     nb = nelec - na
-    wfs = util.listupCSFs(norb, mult, na, nb, remover, max_excitation=max_excitation)
-    print(wfs)
+    wfs = util.listupCSFs(norb, mult, na, nb, ham.remover if hasattr(ham, 'remover') else None, max_excitation=max_excitation)
+    #print(wfs)
     wf_initial = {}
     coeff_csf = len(wfs)**(-0.5)
     for csf in wfs:
@@ -149,60 +183,19 @@ def kernel(mol, norb=None, nelec=None,
             wf_initial[sd] += coeff_sd*coeff_csf
 
     wf_initial = util.mixCSFs(wfs)
-    print(wf_initial)
+    #print(wf_initial)
     state = prepstate(norb*2, wf_initial)
     print('Target Multiplicity : ', mult)
     print('norm(state) : ', state.get_norm())
+
+    ham.set_state(state)
         
-
-    ### 3' : Operate clifford operation
-    from .circuit.symm import SymmRemoveClifford
-    symm_remove_circuits = SymmRemoveClifford(norb*2, remover)
-    
-    from .op.util import paulistr
-    state_symm_removed = state.copy()
-    for symm_remove_circuit in symm_remove_circuits.circuit_list:
-        symm_remove_circuit.update_quantum_state(state_symm_removed)
-    #for sd, coeff in enumerate(state_symm_removed.get_vector()):
-    #    if abs(coeff)<1e-10: continue
-    #    print('{:010b} : {:+.3e}'.format(sd, coeff))
-
-    statevec = state_symm_removed.get_vector().reshape([2]*(norb*2))    
-    n_qubit_tapered = norb*2
-    slices = [slice(None)]*(norb*2)
-    for qop_tgtpauli in remover.targetpauli_qop_list:
-        index_tgtpauli = paulistr(qop_tgtpauli)[0][0]
-        slices[-(index_tgtpauli+1)] = 0
-        n_qubit_tapered -= 1
-        
-    slices_debug = [slice(None)]*(norb*2)
-    for qop_tgtpauli in remover.targetpauli_qop_list:
-        index_tgtpauli = paulistr(qop_tgtpauli)[0][0]
-        slices_debug[-(index_tgtpauli+1)] = 1
-    print(slices)
-    #print(slices_debug)
-    #for sd, coeff in enumerate(statevec[slices].reshape(-1)):
-    #    if abs(coeff)<1e-10: continue
-    #    print('{:010b} : {:+.3e}'.format(sd, coeff))
-    
-    print(np.dot(statevec[slices].reshape(-1), statevec[slices_debug].reshape(-1)))
-    #print(statevec[slices]-statevec[slices_debug])
-    #assert np.max(abs(statevec[slices]-statevec[slices_debug])) < 1e-10
-
-    statevec_tapered = statevec[slices].reshape(-1)
-    statevec_tapered /= np.linalg.norm(statevec_tapered)
-    state_tapered = prepstate(n_qubit_tapered, statevec_tapered)
-
     ### 4 : Estimate correlation function
-    if use_symm_remover:
-        result_corr = estimate_correlation(ham_qop_tapered, state_tapered, dt, max_trotter_step, out, savefilename=None)
-    else:
-        result_corr = estimate_correlation(ham_qop, state, dt, max_trotter_step, out, savefilename=None)
-
+    result_corr = estimate_corr_new(ham, dt, max_trotter_step, out, savefilename=None)
 
     ### 5 : Calculate eigenenergies
     from .analysis.diagonalize import exact_diagonalize
-    list_ene, list_num, list_2S, eigvec = exact_diagonalize(ham_qop, n_site, jobname)
+    list_ene, list_num, list_2S, eigvec = exact_diagonalize(ham.ham_qop, ham.n_site, jobname)
     energy_1let = list_ene[(list_num==nelec)*(list_2S==0)]
 
     from .analysis import prony_like
@@ -219,7 +212,6 @@ def kernel(mol, norb=None, nelec=None,
     spectrum_exact = ft(time_range, corr_exact_extend, energy_range)
     spectrum_trott = ft(time_range, corr_trott_extend, energy_range)
 
-    #freqgraph.draw(energy_4elec_1let, phase_exact, Avec_exact, phase_trotter, Avec_trotter, dt, energy_range, spectrum)
     out.orbprop        = orbprop
     out.energy         = energy_1let
     out.phase_exact    = phase_exact
