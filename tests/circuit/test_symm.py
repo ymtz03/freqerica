@@ -25,7 +25,7 @@ class BasicTestSuite(unittest.TestCase):
         from openfermion import QubitOperator
         ZZZZ = QubitOperator('Z0 Z1 Z2 Z3')
 
-        from freqerica.operator.symm import SymmRemover
+        from freqerica.op.symm import SymmRemover
         remover = SymmRemover(n_qubit, [ZZZZ])
         print(remover)
         

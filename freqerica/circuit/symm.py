@@ -1,5 +1,5 @@
 import qulacs
-from ..operator.util import paulistr
+from ..op.util import paulistr
 
 class SymmRemoveClifford:
     def __init__(self, n_qubit, remover):

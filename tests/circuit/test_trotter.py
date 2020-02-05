@@ -8,7 +8,7 @@ class BasicTestSuite(unittest.TestCase):
     """Basic test cases."""
 
     def test_trotterstep_circuit(self):
-        from freqerica.operator.symbol import WrappedExpr as Symbol
+        from freqerica.op.symbol import WrappedExpr as Symbol
         from openfermion import FermionOperator, jordan_wigner, get_sparse_operator
         from sympy import Array
         import numpy as np

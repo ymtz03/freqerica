@@ -6,10 +6,11 @@ from collections import namedtuple
 import qulacs
 import openfermion
 
+import hamiltonian.exact
 from .circuit import trotter
 from .util.qulacsnize import convert_state_vector
 from .circuit.universal import prepare_civec_circuit, prepstate
-from .operator import ham, util
+from .op import orbital, util
 from .output import freqgraph
 
 EstimateCorrelationResult = namedtuple('EstimateCorrelationResult', ['corr_exact', 'corr_trotter',
@@ -99,18 +100,22 @@ def kernel(mol, norb=None, nelec=None,
     print('mol.topgroup :', mol.topgroup)
     print('mol.groupname :', mol.groupname)
 
-    ### 1 : Construct Hamiltonian Operator
-    orbprop, energy_casci = ham.calculate_moint_and_energy(ham.MoleInput(mol, norb, nelec))
-    ham_fop = ham.construct_exact_ham(orbprop)
-    ham_qop = openfermion.jordan_wigner(ham_fop)
-    n_site  = openfermion.count_qubits(ham_qop)
-
+    ### 0 : Prepare molecular orbitals and integrals
+    orbprop, energy_casci = orbital.calculate_moint_and_energy(orbital.MoleInput(mol, norb, nelec))
     for iorb in range(len(orbprop.irreps)):
         orbtype = 'core' if iorb < orbprop.ncore else 'active' if iorb < orbprop.ncore+orbprop.ncas else 'virtual'
         print('{:03d}  {:4s}  {:7s}  {:+.6e}'.format(iorb, orbprop.irreps[iorb], orbtype, orbprop.mo_energy[iorb]))
+    
+    ### 1 : Construct Hamiltonian Operator
+    ham = hamiltonian.exact.ExactHam(orbprop)
+    #TODO-> ham = hamiltonian.Rankone(orbprop)
+    #TODO-> ham = hamiltonian.Jastrow(orbprop)
+    
+    ham_qop = ham.ham_qop
+    n_site = ham.n_site
 
     ### 2 : Tapering of qubits using Molecular Symmetry
-    from .operator import symm
+    from .op import symm
     #symm_paulistr = symm.symmetry_pauli_string(orbprop, operation_list=['Rz2', 'sxz', 'syz'])
     symm_paulistr = symm.symmetry_pauli_string(orbprop, operation_list=list(symm_eigval_map))
     for symmop, qop in symm_paulistr.items():
@@ -130,33 +135,6 @@ def kernel(mol, norb=None, nelec=None,
     out.nterm         = nterm
     out.nterm_tapered = nterm_tapered
     
-    # ### 2 : Prepare Prepare-CIVec-Circuit
-    # circuit_state_prep = qulacs.QuantumCircuit(n_site)
-    # if civec==None:
-    #     civec={}
-    #     #-> coeff = (2/(n_site*(n_site-1)))**0.5
-    #     #-> for e1 in range(n_site):
-    #     #->     for e2 in range(e1):
-    #     #->         civec[1<<e1 | 1<<e2] = coeff
-    #     n_orb = n_site//2
-    #     coeff = ((n_orb)*(n_orb-1)//2 + n_orb)**(-.5) # Comb(norb, 2)**(-1/2)
-    #     for e1 in range(n_site//2):
-    #         for e2 in range(e1, n_site//2):
-    #             if e1==e2:
-    #                 civec[1<<(e1*2) | 2<<(e2*2)] = +coeff                    
-    #             else:
-    #                 civec[1<<(e1*2) | 2<<(e2*2)] = +coeff*(0.5**0.5)
-    #                 civec[1<<(e2*2) | 2<<(e1*2)] = -coeff*(0.5**0.5)
-    # 
-    # det_hf = sum([1<<i for i in range(nelec)])
-    # civec = {det_hf:1.0}
-    # prepare_civec_circuit(circuit_state_prep, n_site, civec)
-    # 
-    # 
-    # ### 3 : Initialize Quantum State
-    # state = qulacs.QuantumState(n_site)
-    # circuit_state_prep.update_quantum_state(state)
-
     ### 3 : Initialize Quantum State
     if mult is None: mult = 1 if nelec%2==0 else 2
     na = (nelec+mult-1)//2
@@ -181,7 +159,7 @@ def kernel(mol, norb=None, nelec=None,
     from .circuit.symm import SymmRemoveClifford
     symm_remove_circuits = SymmRemoveClifford(norb*2, remover)
     
-    from .operator.util import paulistr
+    from .op.util import paulistr
     state_symm_removed = state.copy()
     for symm_remove_circuit in symm_remove_circuits.circuit_list:
         symm_remove_circuit.update_quantum_state(state_symm_removed)
@@ -259,8 +237,3 @@ def kernel(mol, norb=None, nelec=None,
     out.save()
 
     print("kernel finished")
-
-    
-if __name__=='__main__':
-    moleInput = ham.moleInput_example['LiH']
-    main(moleInput, dt=2., max_trotter_step=100)

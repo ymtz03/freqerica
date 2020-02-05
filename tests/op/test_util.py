@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import unittest
-import freqerica.operator.util
+import freqerica.op.util
 
 
 class BasicTestSuite(unittest.TestCase):
@@ -31,8 +31,8 @@ class BasicTestSuite(unittest.TestCase):
         XXXX = QubitOperator('X0 X1 X2 X3')
         YYYY = QubitOperator('Y0 Y1 Y2 Y3')
 
-        freqerica.operator.util.paulistr(ZZZZ)
-        freqerica.operator.util.paulistr(IXX)
+        freqerica.op.util.paulistr(ZZZZ)
+        freqerica.op.util.paulistr(IXX)
         
         assert True
 
@@ -42,7 +42,7 @@ class BasicTestSuite(unittest.TestCase):
         ZZZZ  = QubitOperator('Z0 Z1 Z2 Z3')
         ZZZZ2 = QubitOperator('Z0 Z1 Z4 Z6')
         
-        from freqerica.operator.symm import SymmRemover
+        from freqerica.op.symm import SymmRemover
         norb = 4
         n_qubit = norb*2
         remover = SymmRemover(n_qubit, [ZZZZ, ZZZZ2])
@@ -50,7 +50,7 @@ class BasicTestSuite(unittest.TestCase):
         remover.set_eigvals([-1, +1])
         print(remover)
         
-        wfs = freqerica.operator.util.listupCSFs(norb, mult=1, na=2, nb=2, remover=remover)
+        wfs = freqerica.op.util.listupCSFs(norb, mult=1, na=2, nb=2, remover=remover)
         #print(wfs)
         
         assert True
@@ -59,21 +59,21 @@ class BasicTestSuite(unittest.TestCase):
         wf = {0b0110: 1.0} # (1b)(2a)
         #wf = {0b0101: 1.0} # (1a)(2a)
         #wf = {0b1010: 1.0} # (1b)(2b)
-        wf_1let = freqerica.operator.util.remove(wf, norb=4, mult_tgt=1, mult_rmv=3) # remove 3let
-        wf_3let = freqerica.operator.util.remove(wf, norb=4, mult_tgt=3, mult_rmv=1) # remove 1let
+        wf_1let = freqerica.op.util.remove(wf, norb=4, mult_tgt=1, mult_rmv=3) # remove 3let
+        wf_3let = freqerica.op.util.remove(wf, norb=4, mult_tgt=3, mult_rmv=1) # remove 1let
 
-        f = freqerica.operator.util.printwf
+        f = freqerica.op.util.printwf
             
         print('1let', f(wf_1let), sep='\n')
         print('3let', f(wf_3let), sep='\n')
 
         wf = {0b10100101: 1.0} # (1a)(2a)(3b)(4b)
-        wf_1let = freqerica.operator.util.remove(wf     , norb=4, mult_tgt=1, mult_rmv=3) # remove 3let
-        wf_1let = freqerica.operator.util.remove(wf_1let, norb=4, mult_tgt=1, mult_rmv=5) # remove 5tet
-        wf_3let = freqerica.operator.util.remove(wf     , norb=4, mult_tgt=3, mult_rmv=1) # remove 1let
-        wf_3let = freqerica.operator.util.remove(wf_3let, norb=4, mult_tgt=3, mult_rmv=5) # remove 5tet
-        wf_5tet = freqerica.operator.util.remove(wf     , norb=4, mult_tgt=5, mult_rmv=1) # remove 1let
-        wf_5tet = freqerica.operator.util.remove(wf_5tet, norb=4, mult_tgt=5, mult_rmv=3) # remove 3tet
+        wf_1let = freqerica.op.util.remove(wf     , norb=4, mult_tgt=1, mult_rmv=3) # remove 3let
+        wf_1let = freqerica.op.util.remove(wf_1let, norb=4, mult_tgt=1, mult_rmv=5) # remove 5tet
+        wf_3let = freqerica.op.util.remove(wf     , norb=4, mult_tgt=3, mult_rmv=1) # remove 1let
+        wf_3let = freqerica.op.util.remove(wf_3let, norb=4, mult_tgt=3, mult_rmv=5) # remove 5tet
+        wf_5tet = freqerica.op.util.remove(wf     , norb=4, mult_tgt=5, mult_rmv=1) # remove 1let
+        wf_5tet = freqerica.op.util.remove(wf_5tet, norb=4, mult_tgt=5, mult_rmv=3) # remove 3tet
 
         print('1let')
         print(f(wf_1let))

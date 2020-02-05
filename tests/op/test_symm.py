@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import unittest
-import freqerica.operator.symm
+import freqerica.op.symm
 
 
 class BasicTestSuite(unittest.TestCase):
@@ -35,7 +35,7 @@ class BasicTestSuite(unittest.TestCase):
         n_qubit=4
         ham  = XXII + XYII*2 + YXII*3 + YYII*4 + IIXX*5 + IIXY*6 + IIYX*7 + IIYY*8 + XXXX*9 + YYYY*10
         symmetry_list = [ZZZZ, ZZII, IIZZ]
-        remover = freqerica.operator.symm.SymmRemover(n_qubit, symmetry_list)
+        remover = freqerica.op.symm.SymmRemover(n_qubit, symmetry_list)
         print(remover)
         ham_c = remover.operate_clifford(ham)
         ZZZZ_c = remover.operate_clifford(ZZZZ)

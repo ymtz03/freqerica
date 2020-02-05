@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 
 import unittest
-import freqerica.operator.ham
+import freqerica.op.orbital
 
 
 class BasicTestSuite(unittest.TestCase):
     """Basic test cases."""
 
     def test_absolute_truth_and_meaning(self):
-        f = freqerica.operator.ham.construct_exact_ham
         assert True
 
 
