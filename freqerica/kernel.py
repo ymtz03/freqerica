@@ -16,13 +16,19 @@ EstimateCorrelationResult = namedtuple('EstimateCorrelationResult', ['corr_exact
                                                                      'statevec_exact', 'statevec_trotter',
                                                                      'time_energy_fidelity'])
 
-def estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None):
+def estimate_correlation(ham_qop, state, dt, max_trotter_step, outputter, savefilename=None):
     const_term = ham_qop.terms[()]
     n_site = openfermion.count_qubits(ham_qop)
-    print('n_site : ', n_site)
+    outputter.n_qubit = n_site
+    outputter.n_trott_step = max_trotter_step
 
-    circuit_time_evo = qulacs.QuantumCircuit(n_site)
-    trotter.trotter_step_2nd_order(circuit_time_evo, -1j * dt * ham_qop)
+    #circuit_time_evo = qulacs.QuantumCircuit(n_site)
+    #trotter.trotter_step_2nd_order(circuit_time_evo, -1j * dt * ham_qop)
+    trotterstep = trotter.TrotterStep(n_site, -1j * dt * ham_qop)
+    circuit_time_evo = trotterstep._circuit
+    outputter.ngate = trotterstep.count_gates()
+    print(trotterstep)
+    print(circuit_time_evo)
 
     ham_tensor = openfermion.get_sparse_operator(ham_qop)
     
@@ -35,6 +41,8 @@ def estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None
     save_time_energy_fidelity = np.empty((len(steps), 4), float)
     save_time_energy_fidelity[:, 0] = steps * dt
 
+    time_sim = 0
+    
     for istep, n_trotter_step in enumerate(steps):
         state_vec_trotter = convert_state_vector(n_site, state.get_vector())
 
@@ -51,12 +59,16 @@ def estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None
         save_time_energy_fidelity[istep, 3] = fidelity
 
         # time propergation
+        time_bgn = time()
         circuit_time_evo.update_quantum_state(state)
+        time_sim += time()-time_bgn
         state_vec_exact = scipy.sparse.linalg.expm_multiply(-1j * dt * ham_tensor, state_vec_exact)
 
     corr_exact   = np.dot(save_state_vec_exact[0]  , save_state_vec_exact.T)
-    corr_trotter = np.dot(save_state_vec_trotter[0], save_state_vec_trotter.T) * np.exp(-1j * dt * steps * const_term)
+    corr_trotter = np.dot(save_state_vec_trotter[0], save_state_vec_trotter.T)# * np.exp(-1j * dt * steps * const_term)
 
+    outputter.time_sim = time_sim
+    
     if savefilename:
         np.save(savefilename+'_ham_tensor', ham_tensor.todense())
         np.save(savefilename+'_corr_exact.npy', corr_exact)
@@ -76,7 +88,7 @@ def kernel(mol, norb=None, nelec=None,
            max_excitation=None,
            symm_eigval_map={},
            use_symm_remover=False,
-           ft_energy_range=np.arange(-.5, 2.5, 0.002),
+           ft_energy_range=np.arange(-.5, 1.5, 0.002),
 ):
 
     out = freqgraph.Outputter()
@@ -205,9 +217,9 @@ def kernel(mol, norb=None, nelec=None,
 
     ### 4 : Estimate correlation function
     if use_symm_remover:
-        result_corr = estimate_correlation(ham_qop_tapered, state_tapered, dt, max_trotter_step, savefilename=None)
+        result_corr = estimate_correlation(ham_qop_tapered, state_tapered, dt, max_trotter_step, out, savefilename=None)
     else:
-        result_corr = estimate_correlation(ham_qop, state, dt, max_trotter_step, savefilename=None)
+        result_corr = estimate_correlation(ham_qop, state, dt, max_trotter_step, out, savefilename=None)
 
 
     ### 5 : Calculate eigenenergies
@@ -224,26 +236,26 @@ def kernel(mol, norb=None, nelec=None,
     energy_and_amp_trott = prony_like.estimate(corr_trott_extend, dt, hint_energy=energy_casci)
 
     from .analysis.ft import ft
-    #energy_range = np.arange(-8.1, -6.7, 0.0001)
     energy_range = energy_casci + ft_energy_range
-    #spectrum = ft(dt*np.arange(-max_trotter_step, max_trotter_step+1), corr_trott_extend, energy_range)
-    #spectrum = ft(dt*np.arange(-max_trotter_step, max_trotter_step+1), corr_trott_extend, energy_range, use_window=False)
-    spectrum = ft(dt*np.arange(-max_trotter_step, max_trotter_step+1), corr_exact_extend, energy_range)
+    time_range = dt*np.arange(-max_trotter_step, max_trotter_step+1)
+    spectrum_exact = ft(time_range, corr_exact_extend, energy_range)
+    spectrum_trott = ft(time_range, corr_trott_extend, energy_range)
 
     #freqgraph.draw(energy_4elec_1let, phase_exact, Avec_exact, phase_trotter, Avec_trotter, dt, energy_range, spectrum)
-    out.orbprop       = orbprop
-    out.energy        = energy_1let
-    out.phase_exact   = phase_exact
-    out.Avec_exact    = Avec_exact
-    out.phase_trotter = phase_trotter
-    out.Avec_trotter  = Avec_trotter
-    out.prony_exact   = energy_and_amp_exact
-    out.prony_trott   = energy_and_amp_trott
-    out.dt            = dt
-    out.energy_range  = energy_range
-    out.spectrum      = spectrum
-    out.corr_exact    = result_corr.corr_exact
-    out.corr_trotter  = result_corr.corr_trotter
+    out.orbprop        = orbprop
+    out.energy         = energy_1let
+    out.phase_exact    = phase_exact
+    out.Avec_exact     = Avec_exact
+    out.phase_trotter  = phase_trotter
+    out.Avec_trotter   = Avec_trotter
+    out.prony_exact    = energy_and_amp_exact
+    out.prony_trott    = energy_and_amp_trott
+    out.dt             = dt
+    out.energy_range   = energy_range
+    out.spectrum_exact = spectrum_exact
+    out.spectrum_trott = spectrum_trott
+    out.corr_exact     = result_corr.corr_exact
+    out.corr_trotter   = result_corr.corr_trotter
     out.save()
 
     print("kernel finished")

@@ -287,6 +287,11 @@ class TrotterStep:
 #PRINT        print(" | circuit:{0:5.2f}".format(ElpTime.circuit),end="")
 #PRINT        print("")
 
+    def count_gates(self):
+        ngate = [0]*(self._n_qubit+1)
+        for ps in self._pauli_string_list: ngate[len(ps)] += 1
+        return ngate
+
     def __repr__(self):
         return str(self)
 
