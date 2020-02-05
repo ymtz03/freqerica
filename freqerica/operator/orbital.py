@@ -1,7 +1,5 @@
 import numpy as np
 from pyscf import gto, scf, mcscf, ao2mo, symm
-from openfermion import FermionOperator
-from itertools import product
 from collections import namedtuple
 
 MoleInput = namedtuple('MoleInput', ['mol', 'norb', 'nelec'])
@@ -69,68 +67,3 @@ def calculate_moint_and_energy(moleInput):
     gint[1::2, 1::2, 1::2, 1::2] = gint_spatial
 
     return OrbitalProperty(hcore, hint, gint, irreps, mf.mo_energy, mf.mo_occ, mf.mo_coeff, mc.ncore, mc.ncas, mc.nelecas), energy_casci
-
-
-def construct_ham_1body(hint, orb_qubit_map=None):
-    if orb_qubit_map is None: orb_qubit_map = list(range(hint.shape[0]))
-    
-    ham_1body = FermionOperator()
-    for (p, p_qubit), (q, q_qubit) in product(enumerate(orb_qubit_map), repeat=2):
-        ham_1body += FermionOperator(((p_qubit, 1), (q_qubit, 0)), hint[p,q])
-
-    return ham_1body
-
-
-def construct_ham_2body(gint, orb_qubit_map=None):
-    if orb_qubit_map is None: orb_qubit_map = list(range(gint.shape[0]))
-    
-    ham_2body = FermionOperator()
-    for (p,p_qubit), (q,q_qubit), (r,r_qubit), (s,s_qubit) in product(enumerate(orb_qubit_map), repeat=4):
-        if p!=r and q!=s:
-            ham_2body += FermionOperator(
-                ((p_qubit, 1),(r_qubit, 1),(s_qubit, 0),(q_qubit, 0)), gint[p,q,r,s]) * 0.5
-
-    return ham_2body
-
-
-def construct_exact_ham(orbprop, orb_qubit_map=None):
-    ham = FermionOperator.identity() * orbprop.hcore
-    ham += construct_ham_1body(orbprop.hint, orb_qubit_map)
-    ham += construct_ham_2body(orbprop.gint, orb_qubit_map)
-    return ham
-
-
-#-> moleInput_example = {}
-#-> 
-#-> mol = gto.Mole()
-#-> mol.basis = "sto-6g"
-#-> mol.verbose = 0
-#-> mol.spin = 0
-#-> mol.atom = [["Li", (0.0, 0.0, 0.0)],["H", (0.0, 0.0, 1.5)]]
-#-> mol.build()
-#-> moleInput_example['LiH'] = MoleInput(mol, norb=5, nelec=2)
-
-
-if __name__=="__main__":
-    r=1.5
-    
-    mol = gto.Mole()
-    mol.basis = "sto-6g"
-    mol.verbose = 0
-    mol.spin = 0
-    mol.atom = [["Li", (0.0, 0.0, 0.0)],["H", (0.0, 0.0, r)]]
-    mol.build()
-
-    norb  = 5
-    nelec = 2
-
-    moleInput = MoleInput(mol, norb, nelec)
-    hcore, hint, gint = calculate_moint_and_energy(moleInput)
-    ham = construct_exact_ham(moleInput)
-
-    import openfermion
-    print('n_qubit:', openfermion.count_qubits(ham))
-
-
-
-
