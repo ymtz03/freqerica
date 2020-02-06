@@ -10,10 +10,21 @@ Install
    cd freqerica
    python setup.py install
    
+Test
+---------------
+   
+.. code-block:: bash
+
+   python setup.py test
+
+Example
+---------------
+   
 .. code-block:: bash
 
    cd example/LiH
    python LiH.py
+   open result.html
 
 .. Sample Module Repository
    ========================
